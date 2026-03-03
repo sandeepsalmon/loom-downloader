@@ -1,36 +1,76 @@
-# Loom Video Downloader
+<p align="center">
+  <h1 align="center">Loom Video Downloader</h1>
+  <p align="center">
+    Download Loom videos as MP4 — even when the download button is disabled.
+    <br />
+    <a href="https://web-flame-one-70.vercel.app"><strong>Try the Web App &rarr;</strong></a>
+  </p>
+</p>
 
-Download Loom videos as MP4 — even when the download button is disabled.
+<br />
+
+## Overview
+
+Two tools in one repo:
+
+| | Web App | CLI |
+|---|---|---|
+| **Best for** | Quick single downloads | Batch downloading |
+| **Runs on** | Browser (Vercel-hosted) | Terminal (Python + ffmpeg) |
+| **Muxing** | ffmpeg.wasm (client-side) | ffmpeg (native) |
+| **Queue** | Yes, with live progress | Sequential or parallel |
+
+<br />
 
 ## Web App
 
-A Next.js web app that runs entirely in the browser. Paste a Loom URL, get an MP4.
+Paste a Loom URL. Get an MP4. That's it.
 
-### How It Works
+### Architecture
 
-1. **Resolve** — Server-side Edge function scrapes the Loom share page, extracts the signed HLS playlist URL, parses the playlist hierarchy, and returns a list of video/audio segment URLs
-2. **Download** — Browser downloads all segments in parallel (6 concurrent) through a proxy that bypasses CORS restrictions
-3. **Mux** — ffmpeg.wasm remuxes the TS segments into a proper MP4 with `-c copy` (no re-encoding, instant)
-4. **Save** — Click to save the MP4 to your computer
+```
+                          ┌──────────────────────────┐
+  Paste URL ──────────▸   │  /api/resolve  (Edge)    │
+                          │  Scrape share page       │
+                          │  Parse HLS playlists     │
+                          │  Return segment URLs     │
+                          └────────────┬─────────────┘
+                                       │
+                          ┌────────────▼─────────────┐
+  6x parallel fetches ──▸ │  /api/proxy  (Edge)      │
+  with progress bar       │  Proxy segments (CORS)   │
+                          └────────────┬─────────────┘
+                                       │
+                          ┌────────────▼─────────────┐
+  Client-side muxing ──▸  │  ffmpeg.wasm             │
+  -c copy (no reencode)   │  TS → MP4 + faststart    │
+                          └────────────┬─────────────┘
+                                       │
+                                  Save .mp4
+```
+
+> Everything processes in your browser. Nothing is stored on the server.
 
 ### Features
 
-- Multiple simultaneous downloads with a queue
-- Real-time progress tracking per download
-- Handles both `luna.loom.com` (newer) and `cdn.loom.com` (older) Loom video formats
-- Automatic retry on failed segments (3 attempts with backoff)
-- Cancel downloads mid-progress
-- No data stored on the server — everything processes in your browser
-- Dark terminal/cyberpunk UI
+- **Queue-based** — add multiple URLs, download simultaneously
+- **Real-time progress** — per-segment tracking with ETA and speed
+- **Auto-retry** — failed segments retry 3x with exponential backoff
+- **Dual format support** — handles both `luna.loom.com` and `cdn.loom.com` video formats
+- **Proper MP4** — remuxed with faststart for instant playback
+- **Cancel anytime** — abort in-flight downloads cleanly
+- **Privacy-first** — no tracking, no accounts, no server storage
 
 ### Tech Stack
 
-- **Next.js 16** with App Router
-- **TypeScript**
-- **Tailwind CSS** + shadcn/ui
-- **Framer Motion** for animations
-- **ffmpeg.wasm** for client-side TS to MP4 muxing
-- **Vercel Edge Runtime** for API routes (no cold starts)
+```
+Next.js 16        App Router + Edge Runtime
+TypeScript        End-to-end type safety
+Tailwind CSS      + shadcn/ui components
+Framer Motion     Animated progress UI
+ffmpeg.wasm       Client-side TS → MP4 muxing
+Vercel Edge       Zero cold-start API routes
+```
 
 ### Run Locally
 
@@ -40,59 +80,103 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
-
-### Deploy to Vercel
+### Deploy
 
 ```bash
 cd web
 npx vercel --prod
 ```
 
+<br />
+
 ## CLI Tool
 
-A Python script for batch downloading from the command line.
+Python script for downloading from the terminal. Handles edge cases the web app can't (restricted CDN formats).
 
-### Usage
+### Quick Start
 
 ```bash
-# Single video
+# requires: python3, ffmpeg
 python loom_dl.py https://www.loom.com/share/VIDEO_ID
-
-# With output name
-python loom_dl.py https://www.loom.com/share/VIDEO_ID -o my_video.mp4
 ```
 
-Requires Python 3 and ffmpeg (`brew install ffmpeg`).
+### Options
+
+```
+Usage: loom_dl.py <url> [-o output.mp4]
+
+Arguments:
+  url           Loom share/embed URL or 32-char video ID
+
+Options:
+  -o, --output  Output filename (default: loom_XXXXXXXX.mp4)
+```
+
+### Batch Download
+
+```bash
+# Edit batch_dl.py with your URLs, then:
+python batch_dl.py
+```
+
+Downloads are organized into folders by module name.
+
+<br />
 
 ## Project Structure
 
 ```
 .
-├── web/                     # Next.js web app
+├── web/                          Next.js web app
 │   ├── app/
-│   │   ├── api/resolve/     # Loom URL → segment list (Edge)
-│   │   ├── api/proxy/       # Segment proxy (Edge)
-│   │   └── page.tsx         # Main UI
-│   ├── components/          # React components
-│   ├── lib/                 # Core logic
-│   └── hooks/               # State management
-├── loom_dl.py               # Python CLI downloader
-├── batch_dl.py              # Batch download script
-└── retry_failed.py          # Parallel retry for failed downloads
+│   │   ├── api/resolve/          POST: Loom URL → segment list
+│   │   ├── api/proxy/            GET: proxy TS segments past CORS
+│   │   ├── layout.tsx            Dark theme, JetBrains Mono
+│   │   └── page.tsx              Main page
+│   ├── components/
+│   │   ├── ui/animated-download  Cyberpunk progress animation
+│   │   ├── url-input             Terminal-style URL input
+│   │   ├── download-card         Per-download progress card
+│   │   └── download-queue        Queue container
+│   ├── lib/
+│   │   ├── loom.ts               Video ID extraction + validation
+│   │   ├── hls-parser.ts         M3U8 playlist parsing
+│   │   ├── download-manager.ts   Segment fetching orchestrator
+│   │   └── ffmpeg-muxer.ts       ffmpeg.wasm muxing
+│   └── hooks/
+│       └── use-downloads.ts      Queue state (useReducer)
+│
+├── loom_dl.py                    CLI downloader (HLS + ffmpeg)
+├── batch_dl.py                   Batch download utility
+└── retry_failed.py               Parallel retry with fallbacks
 ```
 
-## How Loom Video Delivery Works
+<br />
 
-Loom serves videos via HLS (HTTP Live Streaming) with signed CloudFront URLs:
+## How It Works (Technical)
 
-1. The share page embeds a signed m3u8 playlist URL
-2. The master playlist references quality variants (720p, 1080p) and a separate audio track
-3. Sub-playlists contain individual `.ts` segment references (4-6 seconds each)
-4. All URLs carry time-limited CloudFront signed query parameters
+Loom's download restriction is UI-level only. The video data is fully accessible:
 
-The download restriction is at the UI level only — the video data is fully accessible if you have the signed URLs, which are embedded in the page source.
+```
+Share page HTML
+  └─ Contains signed HLS URL (luna.loom.com or cdn.loom.com)
+       └─ Master playlist (.m3u8)
+            ├─ Video sub-playlist → segment-0.ts, segment-1.ts, ...
+            └─ Audio sub-playlist → segment-0.ts, segment-1.ts, ...
+```
+
+All URLs carry **time-limited CloudFront signed query parameters** (`Policy`, `Signature`, `Key-Pair-Id`). The key insight: these signed params from the master playlist URL also grant access to all sub-resources when propagated correctly.
+
+The download process:
+1. Fetch share page → extract m3u8 URL via regex
+2. Fetch master playlist → pick highest quality variant
+3. Fetch sub-playlists → extract segment URLs (make relative → absolute, carry signed params)
+4. Download all segments → concatenate → remux to MP4 with `-c copy`
+
+<br />
 
 ---
 
-Created by Sandeep
+<p align="center">
+  Created by <strong>Sandeep</strong>
+</p>
