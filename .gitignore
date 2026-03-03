@@ -1,1 +1,6 @@
 docs/
+downloads/
+__pycache__/
+*.pyc
+.DS_Store
+yt-dlp-latest
