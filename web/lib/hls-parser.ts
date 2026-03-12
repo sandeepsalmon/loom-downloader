@@ -82,14 +82,16 @@ function makeAbsolute(
   relative: string,
   query: string
 ): string {
+  const querySuffix = query ? `?${query}` : "";
+
   if (relative.startsWith("http")) {
     // Already absolute — add query if missing
-    return relative.includes("?") ? relative : `${relative}?${query}`;
+    return relative.includes("?") || !query ? relative : `${relative}${querySuffix}`;
   }
   // Strip query from base, join, add query
   const base = baseUrl.split("?")[0];
   const dir = base.substring(0, base.lastIndexOf("/") + 1);
-  return `${dir}${relative}?${query}`;
+  return query ? `${dir}${relative}${querySuffix}` : `${dir}${relative}`;
 }
 
 /** Get the base URL directory from a full URL. */

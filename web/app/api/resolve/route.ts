@@ -9,6 +9,21 @@ import {
 
 export const runtime = "edge";
 
+function decodeEscapedUrl(url: string): string {
+  return url.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+}
+
+/** Extract wildcard CloudFront credentials for cdn.loom.com raw session assets. */
+function extractCdnWildcardQuery(html: string): string | null {
+  const credentialsMatch = html.match(
+    /"nullableRawCdnUrl\(\{\\"acceptableMimes\\":\[\\"M3U8\\"\],\\"password\\":null\}\)":\{[\s\S]*?"credentials":\{[\s\S]*?"Policy":"([^"]+)"[\s\S]*?"Signature":"([^"]+)"[\s\S]*?"KeyPairId":"([^"]+)"/
+  );
+  if (!credentialsMatch) return null;
+
+  const [, policy, signature, keyPairId] = credentialsMatch;
+  return `Policy=${policy}&Signature=${signature}&Key-Pair-Id=${keyPairId}`;
+}
+
 export async function POST(request: Request) {
   try {
     const { url } = await request.json();
@@ -55,9 +70,7 @@ export async function POST(request: Request) {
       /"url"\s*:\s*"(https:\/\/luna\.loom\.com\/[^"]+\.m3u8[^"]*)"/
     );
     if (lunaMatch) {
-      hlsUrl = lunaMatch[1]
-        .replace(/\\u0026/g, "&")
-        .replace(/\\\//g, "/");
+      hlsUrl = decodeEscapedUrl(lunaMatch[1]);
     }
 
     // cdn.loom.com (older format)
@@ -66,9 +79,7 @@ export async function POST(request: Request) {
         /(https:\/\/cdn\.loom\.com\/[^"\\]+\.m3u8[^"\\]*)/
       );
       if (cdnMatch) {
-        hlsUrl = cdnMatch[1]
-          .replace(/\\u0026/g, "&")
-          .replace(/\\\//g, "/");
+        hlsUrl = decodeEscapedUrl(cdnMatch[1]);
       }
     }
 
@@ -89,9 +100,13 @@ export async function POST(request: Request) {
     }
     const masterContent = await masterResp.text();
     const baseUrl = getBaseUrl(hlsUrl);
-    const query = getQuery(hlsUrl);
+    const defaultQuery = getQuery(hlsUrl);
+    const cdnWildcardQuery = hlsUrl.includes("cdn.loom.com")
+      ? extractCdnWildcardQuery(html)
+      : null;
+    const streamQuery = cdnWildcardQuery ?? defaultQuery;
 
-    const master = parseMasterPlaylist(masterContent, baseUrl, query);
+    const master = parseMasterPlaylist(masterContent, baseUrl, streamQuery);
 
     if (master.videoPlaylists.length === 0) {
       return NextResponse.json(
@@ -114,7 +129,7 @@ export async function POST(request: Request) {
       videoSegments = parseMediaPlaylist(
         videoPlaylistContent,
         getBaseUrl(bestVideo.url),
-        query
+        streamQuery
       );
 
       // 6. Fetch audio sub-playlist (if separate)
@@ -127,7 +142,7 @@ export async function POST(request: Request) {
           audioSegments = parseMediaPlaylist(
             audioPlaylistContent,
             getBaseUrl(master.audioPlaylistUrl),
-            query
+            streamQuery
           );
         }
       }
@@ -143,9 +158,7 @@ export async function POST(request: Request) {
       );
       if (lunaFallback && !hlsUrl.includes("luna.loom.com")) {
         // Retry with luna URL
-        const lunaUrl = lunaFallback[1]
-          .replace(/\\u0026/g, "&")
-          .replace(/\\\//g, "/");
+        const lunaUrl = decodeEscapedUrl(lunaFallback[1]);
         const lunaResp = await fetch(lunaUrl, { headers: LOOM_HEADERS });
         if (lunaResp.ok) {
           const lunaContent = await lunaResp.text();
