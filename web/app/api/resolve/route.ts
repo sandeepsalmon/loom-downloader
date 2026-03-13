@@ -14,14 +14,36 @@ function decodeEscapedUrl(url: string): string {
 }
 
 /** Extract wildcard CloudFront credentials for cdn.loom.com raw session assets. */
-function extractCdnWildcardQuery(html: string): string | null {
-  const credentialsMatch = html.match(
+function extractCdnWildcardQuery(html: string, hlsUrl: string | null): string | null {
+  // Primary: match the known nullableRawCdnUrl(M3U8) payload structure
+  const primaryMatch = html.match(
     /"nullableRawCdnUrl\(\{\\"acceptableMimes\\":\[\\"M3U8\\"\],\\"password\\":null\}\)":\{[\s\S]*?"credentials":\{[\s\S]*?"Policy":"([^"]+)"[\s\S]*?"Signature":"([^"]+)"[\s\S]*?"KeyPairId":"([^"]+)"/
   );
-  if (!credentialsMatch) return null;
+  if (primaryMatch) {
+    const [, policy, signature, keyPairId] = primaryMatch;
+    return `Policy=${policy}&Signature=${signature}&Key-Pair-Id=${keyPairId}`;
+  }
 
-  const [, policy, signature, keyPairId] = credentialsMatch;
-  return `Policy=${policy}&Signature=${signature}&Key-Pair-Id=${keyPairId}`;
+  // Fallback: same payload contains the m3u8 URL followed by "credentials":{...}
+  // Find the credentials block that appears right after this video's m3u8 URL
+  if (hlsUrl && hlsUrl.includes("cdn.loom.com")) {
+    const afterUrl = html.indexOf(hlsUrl);
+    if (afterUrl >= 0) {
+      const credentialsStart = html.indexOf('"credentials":{', afterUrl);
+      if (credentialsStart >= 0 && credentialsStart - afterUrl < 500) {
+        const block = html.slice(credentialsStart, credentialsStart + 1200);
+        const credMatch = block.match(
+          /"Policy":"([^"]+)"[\s\S]*?"Signature":"([^"]+)"[\s\S]*?"KeyPairId":"([^"]+)"/
+        );
+        if (credMatch) {
+          const [, policy, signature, keyPairId] = credMatch;
+          return `Policy=${policy}&Signature=${signature}&Key-Pair-Id=${keyPairId}`;
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function POST(request: Request) {
@@ -102,7 +124,7 @@ export async function POST(request: Request) {
     const baseUrl = getBaseUrl(hlsUrl);
     const defaultQuery = getQuery(hlsUrl);
     const cdnWildcardQuery = hlsUrl.includes("cdn.loom.com")
-      ? extractCdnWildcardQuery(html)
+      ? extractCdnWildcardQuery(html, hlsUrl)
       : null;
     const streamQuery = cdnWildcardQuery ?? defaultQuery;
 

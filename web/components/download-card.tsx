@@ -77,6 +77,13 @@ export function DownloadCard({
         speed={job.speed}
       />
 
+      {/* Error message */}
+      {job.status === "error" && job.error && (
+        <p className="mt-2 text-xs font-mono text-red-400 break-words" title={job.error}>
+          {job.error}
+        </p>
+      )}
+
       {/* Actions */}
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-foreground/5">
         <div className="text-xs font-mono text-muted-foreground">
